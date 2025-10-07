@@ -1,0 +1,25 @@
+# Конфиденциальные файлы
+config.h
+
+# Arduino IDE
+*.tmp
+*.log
+*.cache
+
+# Build artifacts  
+build/
+*.bin
+*.hex
+*.elf
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+
+# Logs
+*.log
+serial_output.txt
