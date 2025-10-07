@@ -12,8 +12,16 @@
 #include <time.h>
 #include <math.h>
 
-// Подключение файла конфигурации (создайте config.h из config.example.h)
-#include "config.h"
+// Попытка подключения файла конфигурации
+// Если config.h не существует, используются значения по умолчанию
+#if __has_include("config.h")
+  #include "config.h"
+#else
+  #warning "Файл config.h не найден! Создайте его из config.example.h"
+  #define YANDEX_API_KEY "ЗАМЕНИТЕ_НА_ВАШ_YANDEX_API_KEY"
+  #define YANDEX_FOLDER_ID "ЗАМЕНИТЕ_НА_ВАШ_YANDEX_FOLDER_ID"
+  #define OPENWEATHER_API_KEY "ЗАМЕНИТЕ_НА_ВАШ_OPENWEATHER_API_KEY"
+#endif
 
 // =======================================================
 // 1. ПИНЫ ДЛЯ ESP32-S3
@@ -156,31 +164,43 @@ void setVolume(int newVolume) {
 }
 
 void stopRadio() {
-  xSemaphoreTake(xMutex, portMAX_DELAY);
-  if (isRadioPlaying) {
-    radioClient.stop();
-    isRadioPlaying = false;
-    Serial.println("Радио остановлено");
+  if (xSemaphoreTake(xMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+    if (isRadioPlaying) {
+      radioClient.stop();
+      isRadioPlaying = false;
+      Serial.println("Радио остановлено");
+    }
+    xSemaphoreGive(xMutex);
+  } else {
+    Serial.println("Не удалось получить мьютекс для остановки радио");
   }
-  xSemaphoreGive(xMutex);
 }
 
 void playTone(int frequency, int duration) {
-  xSemaphoreTake(xMutex, portMAX_DELAY);
+  if (xSemaphoreTake(xMutex, pdMS_TO_TICKS(100)) != pdTRUE) {
+    Serial.println("Не удалось получить мьютекс для тона");
+    return;
+  }
   stopRadio();
   isSpeeching = true;
-  int16_t buffer[128];
+  
+  // Буфер для стерео (2 канала)
+  int16_t buffer[256]; // 128 сэмплов * 2 канала
   float phase = 0;
   float phaseIncrement = 2 * PI * frequency / SAMPLE_RATE_TX;
   unsigned long totalSamples = (unsigned long)duration * SAMPLE_RATE_TX / 1000;
+  
   for (size_t i = 0; i < totalSamples; i += 128) {
     for (int j = 0; j < 128; j++) {
-      buffer[j] = (int16_t)(sin(phase) * 32767.0 * volume);
+      int16_t sample = (int16_t)(sin(phase) * 16383.0 * volume); // Уменьшили амплитуду
+      buffer[j * 2] = sample;     // левый канал
+      buffer[j * 2 + 1] = sample; // правый канал
       phase += phaseIncrement;
       if (phase > 2 * PI) phase -= 2 * PI;
     }
-    i2s_tx.write((uint8_t*)buffer, 128 * sizeof(int16_t));
+    i2s_tx.write((uint8_t*)buffer, 256 * sizeof(int16_t));
   }
+  
   isSpeeching = false;
   xSemaphoreGive(xMutex);
 }
@@ -190,7 +210,10 @@ void speak(const String& text) {
     Serial.println("Ошибка: Нет времени или WiFi");
     return;
   }
-  xSemaphoreTake(xMutex, portMAX_DELAY);
+  if (xSemaphoreTake(xMutex, pdMS_TO_TICKS(1000)) != pdTRUE) {
+    Serial.println("Не удалось получить мьютекс для TTS");
+    return;
+  }
   stopRadio();
   isSpeeching = true;
   WiFiClientSecure client;
@@ -222,10 +245,17 @@ void speak(const String& text) {
   int httpCode = http.POST(body);
   if (httpCode == HTTP_CODE_OK) {
     WiFiClient* stream = http.getStreamPtr();
-    copier.begin(i2s_tx, *stream);
+    
+    // Читаем данные из потока и воспроизводим напрямую
+    uint8_t buffer[1024];
     while (stream->connected() && stream->available()) {
-      size_t bytesCopied = copier.copy();
-      if (bytesCopied == 0) break;
+      int bytesRead = stream->read(buffer, sizeof(buffer));
+      if (bytesRead > 0) {
+        // Воспроизводим как сырые LPCM данные
+        i2s_tx.write(buffer, bytesRead);
+      } else {
+        break;
+      }
     }
     Serial.println("TTS воспроизведение завершено");
   } else {
@@ -253,7 +283,10 @@ void playRadio(const String& stationName) {
       }
     }
   }
-  xSemaphoreTake(xMutex, portMAX_DELAY);
+  if (xSemaphoreTake(xMutex, pdMS_TO_TICKS(1000)) != pdTRUE) {
+    Serial.println("Не удалось получить мьютекс для радио");
+    return;
+  }
   stopRadio();
   String host, path;
   bool isHttps = url.startsWith("https://");
@@ -597,8 +630,8 @@ void recordTask(void* parameter) {
       if (maxAmplitude > ACTIVATION_THRESHOLD) {
         digitalWrite(LED_PIN, LOW);
         Serial.println("Обнаружен звук. Амплитуда: " + String(maxAmplitude));
-        if (xSemaphoreTake(xMutex, 10 / portTICK_PERIOD_MS) != pdTRUE) {
-          Serial.println("Не удалось получить мьютекс");
+        if (xSemaphoreTake(xMutex, pdMS_TO_TICKS(100)) != pdTRUE) {
+          Serial.println("Не удалось получить мьютекс для записи");
           digitalWrite(LED_PIN, HIGH);
           continue;
         }
@@ -703,30 +736,33 @@ void setup() {
   }
 
   Serial.println("Инициализация I2S TX...");
-  I2SConfig cfg_tx = i2s_tx.defaultConfig(TX_MODE);
-  cfg_tx.sample_rate = SAMPLE_RATE_TX;
-  cfg_tx.bits_per_sample = 16;
-  cfg_tx.i2s_format = I2S_STD_FORMAT;
-  cfg_tx.pin_bck = I2S_TX_BCLK_PIN;
-  cfg_tx.pin_ws = I2S_TX_LRC_PIN;
-  cfg_tx.pin_data = I2S_TX_DATA_OUT_PIN;
-  cfg_tx.buffer_count = 4;
-  cfg_tx.buffer_size = 128;
-  if (!i2s_tx.begin(cfg_tx)) {
+  auto config_tx = i2s_tx.defaultConfig(TX_MODE);
+  config_tx.sample_rate = SAMPLE_RATE_TX;
+  config_tx.bits_per_sample = 16;
+  config_tx.channels = 2;
+  config_tx.i2s_format = I2S_STD_FORMAT;
+  config_tx.pin_bck = I2S_TX_BCLK_PIN;
+  config_tx.pin_ws = I2S_TX_LRC_PIN;
+  config_tx.pin_data = I2S_TX_DATA_OUT_PIN;
+  config_tx.buffer_count = 4;
+  config_tx.buffer_size = 512;
+  if (!i2s_tx.begin(config_tx)) {
     Serial.println("Ошибка инициализации I2S TX");
     while (true);
   }
+  
   Serial.println("Инициализация I2S RX...");
-  I2SConfig cfg_rx = i2s_rx.defaultConfig(RX_MODE);
-  cfg_rx.sample_rate = SAMPLE_RATE_RX;
-  cfg_rx.bits_per_sample = 16;
-  cfg_rx.i2s_format = I2S_STD_FORMAT;
-  cfg_rx.pin_bck = I2S_RX_BCLK_PIN;
-  cfg_rx.pin_ws = I2S_RX_LRC_PIN;
-  cfg_rx.pin_data = I2S_RX_DATA_IN_PIN;
-  cfg_rx.buffer_count = 4;
-  cfg_rx.buffer_size = 128;
-  if (!i2s_rx.begin(cfg_rx)) {
+  auto config_rx = i2s_rx.defaultConfig(RX_MODE);
+  config_rx.sample_rate = SAMPLE_RATE_RX;
+  config_rx.bits_per_sample = 16;
+  config_rx.channels = 1;
+  config_rx.i2s_format = I2S_STD_FORMAT;
+  config_rx.pin_bck = I2S_RX_BCLK_PIN;
+  config_rx.pin_ws = I2S_RX_LRC_PIN;
+  config_rx.pin_data = I2S_RX_DATA_IN_PIN;
+  config_rx.buffer_count = 8;
+  config_rx.buffer_size = 512;
+  if (!i2s_rx.begin(config_rx)) {
     Serial.println("Ошибка инициализации I2S RX");
     while (true);
   }

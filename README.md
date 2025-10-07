@@ -81,11 +81,16 @@ GPIO 2 - LED (встроенный светодиод)
    - Это загрузит файлы из папки `data/` в память ESP32
 
 ### 4. API ключи
-Обновите в коде:
+Создайте файл `config.h` из шаблона:
+```bash
+cp config.example.h config.h
+```
+
+Затем отредактируйте `config.h` и замените тестовые значения:
 ```cpp
-const char* YANDEX_API_KEY = "ваш_ключ_yandex";
-const char* YANDEX_FOLDER_ID = "ваш_folder_id";
-const char* OPENWEATHER_API_KEY = "ваш_ключ_openweather";
+#define YANDEX_API_KEY "ваш_реальный_ключ_yandex"
+#define YANDEX_FOLDER_ID "ваш_реальный_folder_id"
+#define OPENWEATHER_API_KEY "ваш_реальный_ключ_openweather"
 ```
 
 ## 🚀 Первый запуск
