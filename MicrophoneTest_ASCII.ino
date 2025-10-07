@@ -182,8 +182,8 @@ void handleRoot() {
         
         <div class="control-panel">
             <h3>Controls</h3>
-            <button id="startBtn" onclick="startTest()">&#9654; Start Test</button>
-            <button id="stopBtn" onclick="stopTest()" class="stop">&#9632; Stop Test</button>
+            <button id="startBtn" onclick="startTest()">[START] Start Test</button>
+            <button id="stopBtn" onclick="stopTest()" class="stop">[STOP] Stop Test</button>
             <br>
             <div class="slider-container">
                 <label for="gainSlider">Gain: <span id="gainValue">2.0</span>x</label>
@@ -375,7 +375,7 @@ void microphoneTask(void* parameter) {
         // Update amplitude statistics
         xSemaphoreTake(amplitudeMutex, portMAX_DELAY);
         currentAmplitude = amplitude;
-        maxAmplitude = max(maxAmplitude, amplitude);
+        maxAmplitude = max((int)maxAmplitude, amplitude);
         xSemaphoreGive(amplitudeMutex);
         
         // Apply gain and convert to stereo
