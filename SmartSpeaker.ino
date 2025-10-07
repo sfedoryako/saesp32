@@ -354,6 +354,37 @@ String speechToText(const uint8_t* audioData, size_t audioSize) {
   
   Serial.println("🎤 STT: Начало распознавания, размер: " + String(audioSize) + " байт");
   
+  // Диагностика аудио данных
+  float durationSec = (float)audioSize / (SAMPLE_RATE_RX * 2); // 16-bit = 2 байта на сэмпл
+  Serial.println("⏱️ Длительность аудио: " + String(durationSec, 2) + " секунд");
+  Serial.println("🎵 Формат: LPCM, " + String(SAMPLE_RATE_RX) + " Гц, 16-bit моно");
+  
+  // Проверяем качество аудио (амплитуда)
+  int16_t* samples = (int16_t*)audioData;
+  int maxAmplitude = 0, minAmplitude = 0;
+  long sumAmplitude = 0;
+  size_t numSamples = audioSize / 2;
+  
+  for (size_t i = 0; i < numSamples; i++) {
+    int16_t sample = samples[i];
+    if (sample > maxAmplitude) maxAmplitude = sample;
+    if (sample < minAmplitude) minAmplitude = sample;
+    sumAmplitude += abs(sample);
+  }
+  
+  int avgAmplitude = sumAmplitude / numSamples;
+  Serial.println("🔊 Анализ аудио:");
+  Serial.println("   📈 Макс. амплитуда: " + String(maxAmplitude));
+  Serial.println("   📉 Мин. амплитуда: " + String(minAmplitude));
+  Serial.println("   📊 Средняя амплитуда: " + String(avgAmplitude));
+  
+  if (avgAmplitude < 100) {
+    Serial.println("⚠️ ПРЕДУПРЕЖДЕНИЕ: Очень тихий звук (средняя амплитуда < 100)");
+  }
+  if (maxAmplitude < 1000) {
+    Serial.println("⚠️ ПРЕДУПРЕЖДЕНИЕ: Слабый сигнал (макс. амплитуда < 1000)");
+  }
+  
   WiFiClientSecure client;
   client.setCACert(ROOT_CA);
   client.setTimeout(HTTP_TIMEOUT);
@@ -411,11 +442,28 @@ String speechToText(const uint8_t* audioData, size_t audioSize) {
       
       if (!error && responseDoc.containsKey("result")) {
         result = responseDoc["result"].as<String>();
-        Serial.println("🎯 Распознанный текст: " + result);
-        break;
+        Serial.println("🎯 Распознанный текст: '" + result + "'");
+        
+        if (result.isEmpty()) {
+          Serial.println("⚠️ STT: Пустой результат распознавания");
+          Serial.println("🔍 Возможные причины:");
+          Serial.println("   - Слишком тихий звук или фоновый шум");
+          Serial.println("   - Неподходящая частота дискретизации");
+          Serial.println("   - Речь неразборчива или на другом языке");
+          Serial.println("   - Слишком короткая или длинная запись");
+        } else {
+          break; // Успешное распознавание
+        }
       } else {
         Serial.println("❌ STT: Ошибка парсинга JSON");
         Serial.println("📄 Полный ответ: " + payload);
+        
+        if (responseDoc.containsKey("error_code")) {
+          String errorCode = responseDoc["error_code"].as<String>();
+          String errorMessage = responseDoc["error_message"].as<String>();
+          Serial.println("🚨 Код ошибки Yandex: " + errorCode);
+          Serial.println("💬 Сообщение: " + errorMessage);
+        }
       }
     } else if (httpCode == -1) {
       Serial.println("❌ STT: Connection Refused - возможные причины:");
