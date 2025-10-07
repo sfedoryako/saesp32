@@ -363,34 +363,24 @@ String speechToText(const uint8_t* audioData, size_t audioSize) {
   http.setTimeout(HTTP_TIMEOUT);
   http.setConnectTimeout(15000); // Увеличенный таймаут подключения
   
-  // Улучшенный URL без GET параметров в строке
-  String sttUrl = String("https://") + YANDEX_STT_HOST + "/speech/v1/stt:recognize";
+  // Правильный STT URL с обязательным параметром folderId для API v1
+  String sttUrl = String("https://") + YANDEX_STT_HOST + "/speech/v1/stt:recognize" +
+                  "?lang=ru-RU&format=lpcm&sampleRateHertz=" + String(SAMPLE_RATE_RX) +
+                  "&folderId=" + String(YANDEX_FOLDER_ID);
   
   Serial.println("📡 STT URL: " + sttUrl);
   Serial.println("🔑 API Key (первые 10 символов): " + String(YANDEX_API_KEY).substring(0, 10) + "...");
   Serial.println("📁 Folder ID: " + String(YANDEX_FOLDER_ID));
   
-  // Инициализируем HTTP соединение
+  // Инициализируем HTTP соединение с правильным URL
   if (!http.begin(client, sttUrl)) {
     Serial.println("❌ STT: Ошибка инициализации HTTP клиента");
     return "";
   }
   
-  // Заголовки
+  // Правильные заголовки для API v1
   http.addHeader("Authorization", "Api-Key " + String(YANDEX_API_KEY));
   http.addHeader("Content-Type", "application/octet-stream");
-  http.addHeader("x-folder-id", String(YANDEX_FOLDER_ID));
-  http.addHeader("x-data-logging-enabled", "false");
-  
-  // Параметры в URL
-  String fullUrl = sttUrl + "?lang=ru-RU&format=lpcm&sampleRateHertz=" + String(SAMPLE_RATE_RX);
-  http.begin(client, fullUrl);
-  
-  // Повторяем заголовки после смены URL
-  http.addHeader("Authorization", "Api-Key " + String(YANDEX_API_KEY));
-  http.addHeader("Content-Type", "application/octet-stream");
-  http.addHeader("x-folder-id", String(YANDEX_FOLDER_ID));
-  http.addHeader("x-data-logging-enabled", "false");
   
   String result = "";
   
