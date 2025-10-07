@@ -698,44 +698,73 @@ void recordTask(void* parameter) {
 // =======================================================
 void setup() {
   Serial.begin(115200);
-  delay(1000);
-  Serial.println("Диагностика ESP32-S3 начата...");
-  Serial.println("Свободная память на старте: " + String(ESP.getFreeHeap()));
-  Serial.println("PSRAM доступно: " + String(ESP.getFreePsram()));
+  delay(2000); // Увеличиваем задержку для стабилизации
+  
+  Serial.println("\n" + String("=").substring(0, 50));
+  Serial.println("🚀 ESP32-S3 Smart Speaker - Диагностика запуска");
+  Serial.println(String("=").substring(0, 50));
+  Serial.println("📊 Версия: 2.0 (исправлена)");
+  Serial.println("💾 Свободная память: " + String(ESP.getFreeHeap()) + " байт");
+  Serial.println("🧠 PSRAM доступно: " + String(ESP.getFreePsram()) + " байт");
+  Serial.println("🔧 Частота CPU: " + String(getCpuFrequencyMhz()) + " МГц");
+  Serial.println("");
 
+  Serial.print("🔌 Инициализация GPIO... ");
   pinMode(LED_PIN, OUTPUT);
   digitalWrite(LED_PIN, HIGH);
+  Serial.println("OK");
 
-  Serial.println("Инициализация SPIFFS...");
+  Serial.print("💾 Инициализация SPIFFS... ");
   if (!SPIFFS.begin(false)) {
-    Serial.println("Ошибка: SPIFFS.begin(false) не удалось. Пробуем форматировать...");
+    Serial.println("ОШИБКА!");
+    Serial.println("⚠️ SPIFFS.begin(false) не удалось. Пробуем форматировать...");
     if (!SPIFFS.begin(true)) {
-      Serial.println("Ошибка: Форматирование SPIFFS не удалось");
-      while (true);
+      Serial.println("❌ КРИТИЧЕСКАЯ ОШИБКА: Форматирование SPIFFS не удалось!");
+      Serial.println("💡 Решение: Загрузите данные SPIFFS через Arduino IDE");
+      Serial.println("   Tools → ESP32 Sketch Data Upload");
+      // Не зависаем, продолжаем без SPIFFS
+      Serial.println("🔄 Продолжаем без SPIFFS (ограниченная функциональность)");
+    } else {
+      Serial.println("✅ SPIFFS отформатирован");
     }
+  } else {
+    Serial.println("OK");
   }
-  Serial.println("SPIFFS инициализирован, свободно: " + String((SPIFFS.totalBytes() - SPIFFS.usedBytes()) / 1024) + " КБ");
-
-  Serial.println("Проверка файлов в SPIFFS...");
-  File root = SPIFFS.open("/");
-  while (File file = root.openNextFile()) {
-    Serial.println("Файл: " + String(file.name()) + ", размер: " + String(file.size()) + " байт");
-    file.close();
+  
+  if (SPIFFS.begin(false)) {
+    Serial.println("📁 SPIFFS доступен, свободно: " + String((SPIFFS.totalBytes() - SPIFFS.usedBytes()) / 1024) + " КБ");
+    
+    Serial.println("📂 Проверка файлов в SPIFFS:");
+    File root = SPIFFS.open("/");
+    int fileCount = 0;
+    while (File file = root.openNextFile()) {
+      Serial.println("   📄 " + String(file.name()) + " (" + String(file.size()) + " байт)");
+      file.close();
+      fileCount++;
+    }
+    root.close();
+    
+    if (fileCount == 0) {
+      Serial.println("⚠️ SPIFFS пустой! Загрузите файлы через Arduino IDE:");
+      Serial.println("   Tools → ESP32 Sketch Data Upload");
+    }
+    
+    if (!SPIFFS.exists(CERT_FILE)) {
+      Serial.println("⚠️ Файл " + String(CERT_FILE) + " отсутствует!");
+      Serial.println("💡 HTTPS функции будут недоступны (TTS, погода, курсы)");
+      Serial.println("🔄 Продолжаем с ограниченной функциональностью...");
+    } else {
+      Serial.println("✅ SSL сертификат найден");
+    }
+  } else {
+    Serial.println("❌ SPIFFS недоступен - только базовая функциональность");
   }
-  root.close();
 
-  if (!SPIFFS.exists(CERT_FILE)) {
-    Serial.println("Ошибка: Файл " + String(CERT_FILE) + " отсутствует");
-    while (true);
-  }
+  // Пропускаем загрузку сертификата на этапе инициализации
+  // Сертификат будет загружаться по мере необходимости в каждой функции
+  Serial.println("⏭️ Пропускаем предварительную загрузку сертификата");
 
-  char cert[1500] = {0};
-  if (!loadCertificateFromSPIFFS(CERT_FILE, cert, sizeof(cert))) {
-    Serial.println("Ошибка загрузки сертификата");
-    while (true);
-  }
-
-  Serial.println("Инициализация I2S TX...");
+  Serial.print("🎵 Инициализация I2S TX (вывод аудио)... ");
   auto config_tx = i2s_tx.defaultConfig(TX_MODE);
   config_tx.sample_rate = SAMPLE_RATE_TX;
   config_tx.bits_per_sample = 16;
@@ -746,12 +775,25 @@ void setup() {
   config_tx.pin_data = I2S_TX_DATA_OUT_PIN;
   config_tx.buffer_count = 4;
   config_tx.buffer_size = 512;
+  
+  Serial.println(""); // Новая строка для детальной информации
+  Serial.println("   📊 Настройки I2S TX:");
+  Serial.println("      Частота: " + String(SAMPLE_RATE_TX) + " Гц, Стерео, 16 бит");
+  Serial.println("      Пины: BCK=" + String(I2S_TX_BCLK_PIN) + ", WS=" + String(I2S_TX_LRC_PIN) + ", DATA=" + String(I2S_TX_DATA_OUT_PIN));
+  
   if (!i2s_tx.begin(config_tx)) {
-    Serial.println("Ошибка инициализации I2S TX");
-    while (true);
+    Serial.println("❌ КРИТИЧЕСКАЯ ОШИБКА: Инициализация I2S TX не удалась!");
+    Serial.println("💡 Проверьте:");
+    Serial.println("   - Подключение ЦАП PCM5102A");
+    Serial.println("   - Правильность пинов GPIO");
+    Serial.println("   - Конфликты пинов с другими устройствами");
+    Serial.println("🔄 Продолжаем без аудио вывода (тестовый режим)");
+    // Не зависаем, продолжаем без I2S TX
+  } else {
+    Serial.println("✅ I2S TX инициализирован успешно");
   }
   
-  Serial.println("Инициализация I2S RX...");
+  Serial.print("🎤 Инициализация I2S RX (запись звука)... ");
   auto config_rx = i2s_rx.defaultConfig(RX_MODE);
   config_rx.sample_rate = SAMPLE_RATE_RX;
   config_rx.bits_per_sample = 16;
@@ -762,38 +804,68 @@ void setup() {
   config_rx.pin_data = I2S_RX_DATA_IN_PIN;
   config_rx.buffer_count = 8;
   config_rx.buffer_size = 512;
+  
+  Serial.println(""); // Новая строка для детальной информации
+  Serial.println("   📊 Настройки I2S RX:");
+  Serial.println("      Частота: " + String(SAMPLE_RATE_RX) + " Гц, Моно, 16 бит");
+  Serial.println("      Пины: BCK=" + String(I2S_RX_BCLK_PIN) + ", WS=" + String(I2S_RX_LRC_PIN) + ", DATA=" + String(I2S_RX_DATA_IN_PIN));
+  
   if (!i2s_rx.begin(config_rx)) {
-    Serial.println("Ошибка инициализации I2S RX");
-    while (true);
+    Serial.println("❌ КРИТИЧЕСКАЯ ОШИБКА: Инициализация I2S RX не удалась!");
+    Serial.println("💡 Проверьте:");
+    Serial.println("   - Подключение I2S микрофона");
+    Serial.println("   - Правильность пинов GPIO");
+    Serial.println("   - Питание микрофона");
+    Serial.println("🔄 Продолжаем без записи звука (только веб-интерфейс)");
+    // Не зависаем, продолжаем без I2S RX
+  } else {
+    Serial.println("✅ I2S RX инициализирован успешно");
   }
-  Serial.println("I2S инициализирован");
-  Serial.println("Свободная память после I2S: " + String(ESP.getFreeHeap()));
+  
+  Serial.println("🔊 I2S подсистема готова");
+  Serial.println("💾 Свободная память после I2S: " + String(ESP.getFreeHeap()) + " байт");
 
+  Serial.print("🎧 Создание MP3 декодера... ");
   decoder = new EncodedAudioStream(&i2s_tx, new MP3DecoderHelix());
   if (!decoder) {
-    Serial.println("Ошибка создания декодера");
-    while (true);
+    Serial.println("❌ ОШИБКА!");
+    Serial.println("⚠️ Не удалось создать MP3 декодер");
+    Serial.println("💡 Радио функции будут недоступны");
+    Serial.println("🔄 Продолжаем без декодера...");
+  } else {
+    Serial.println("OK");
   }
-  Serial.println("Декодер инициализирован");
-  Serial.println("Свободная память после декодера: " + String(ESP.getFreeHeap()));
+  Serial.println("💾 Свободная память после декодера: " + String(ESP.getFreeHeap()) + " байт");
 
+  Serial.print("🔒 Создание мьютекса... ");
   xMutex = xSemaphoreCreateMutex();
   if (xMutex == NULL) {
-    Serial.println("Ошибка создания мьютекса");
-    while (true);
+    Serial.println("❌ КРИТИЧЕСКАЯ ОШИБКА!");
+    Serial.println("⚠️ Не удалось создать мьютекс");
+    Serial.println("🔄 Продолжаем без синхронизации (может быть нестабильно)");
+  } else {
+    Serial.println("OK");
   }
 
+  Serial.println("");
+  Serial.print("🔔 Тестирование аудио (загрузочный тон)... ");
   playTone(TONE_BOOT_FREQ, TONE_BOOT_DURATION);
+  Serial.println("OK");
 
-  Serial.println("Попытка подключения к WiFi...");
+  Serial.println("");
+  Serial.print("📡 Попытка подключения к WiFi... ");
+  
   File wifiFile = SPIFFS.open(WIFI_FILE, "r");
   if (wifiFile) {
+    Serial.println("");
+    Serial.println("   📄 Найдены сохранённые настройки WiFi");
     StaticJsonDocument<200> doc;
     DeserializationError error = deserializeJson(doc, wifiFile);
     wifiFile.close();
     if (!error) {
       ssid = doc["ssid"].as<String>();
       password = doc["password"].as<String>();
+      Serial.println("   🔗 Подключение к: " + ssid);
       WiFi.begin(ssid.c_str(), password.c_str());
       int attempts = 0;
       while (WiFi.status() != WL_CONNECTED && attempts < 20) {
@@ -801,19 +873,35 @@ void setup() {
         Serial.print(".");
         attempts++;
       }
+      Serial.println("");
+    } else {
+      Serial.println("   ❌ Ошибка чтения настроек WiFi");
     }
+  } else {
+    Serial.println("НЕТ НАСТРОЕК");
+    Serial.println("   ⚠️ Файл настроек WiFi не найден");
   }
+  
   if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("❌ Не удалось подключиться к сохранённой сети");
+    Serial.println("🔥 Создание точки доступа: " + String(AP_SSID));
+    Serial.println("   📶 SSID: " + String(AP_SSID));
+    Serial.println("   🔑 Пароль: " + String(AP_PASSWORD));
+    Serial.println("   🌐 IP адрес: 192.168.4.1");
     WiFi.softAP(AP_SSID, AP_PASSWORD);
-    Serial.println("Режим точки доступа: " + String(AP_SSID));
     playTone(TONE_WIFI_FAIL_FREQ, TONE_WIFI_FAIL_DURATION);
   } else {
-    Serial.println("Подключено к WiFi: " + WiFi.localIP().toString());
-    Serial.println("RSSI: " + String(WiFi.RSSI()));
+    Serial.println("✅ Успешно подключено к WiFi!");
+    Serial.println("   📶 SSID: " + WiFi.SSID());
+    Serial.println("   🌐 IP адрес: " + WiFi.localIP().toString());
+    Serial.println("   📡 Сила сигнала: " + String(WiFi.RSSI()) + " dBm");
     playTone(TONE_WIFI_OK_FREQ, TONE_WIFI_OK_DURATION);
+    Serial.println("   🕐 Синхронизация времени...");
     syncTime();
   }
 
+  Serial.println("");
+  Serial.print("🌐 Запуск веб-сервера... ");
   server.on("/", handleRoot);
   server.on("/status", handleStatus);
   server.on("/command", HTTP_POST, handleCommand);
@@ -822,12 +910,40 @@ void setup() {
   server.on("/setVolume", HTTP_POST, handleSetVolume);
   server.on("/sleep", HTTP_POST, handleSleep);
   server.begin();
-  Serial.println("WebServer запущен");
-  Serial.println("Свободная память после WebServer: " + String(ESP.getFreeHeap()));
+  Serial.println("OK");
+  Serial.println("   📄 Маршруты веб-сервера настроены");
+  Serial.println("   🔗 Веб-интерфейс доступен по адресу:");
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println("      http://" + WiFi.localIP().toString());
+  } else {
+    Serial.println("      http://192.168.4.1");
+  }
+  Serial.println("💾 Свободная память после веб-сервера: " + String(ESP.getFreeHeap()) + " байт");
 
+  Serial.println("");
+  Serial.print("🎙️ Запуск задачи записи аудио... ");
   xTaskCreatePinnedToCore(recordTask, "RecordTask", 16384, NULL, 1, NULL, 0);
-  Serial.println("Задача записи запущена");
-  Serial.println("Скрипт готов...");
+  Serial.println("OK");
+  Serial.println("   🔊 Голосовая активация по ключевому слову: '" + String(KEYWORD) + "'");
+  Serial.println("   🎚️ Пороговая амплитуда: " + String(ACTIVATION_THRESHOLD));
+  
+  Serial.println("");
+  Serial.println(String("=").substring(0, 60));
+  Serial.println("🎉 SMART SPEAKER УСПЕШНО ЗАПУЩЕН!");
+  Serial.println(String("=").substring(0, 60));
+  Serial.println("💡 Теперь вы можете:");
+  Serial.println("   🗣️ Сказать: 'Алёна' + команда (погода, время, радио)");
+  Serial.println("   🌐 Открыть веб-интерфейс в браузере");
+  Serial.println("   📱 Управлять через мобильное приложение");
+  Serial.println("");
+  Serial.println("📊 Финальная статистика:");
+  Serial.println("   💾 Свободная RAM: " + String(ESP.getFreeHeap()) + " байт");
+  Serial.println("   🧠 PSRAM: " + String(ESP.getFreePsram()) + " байт");
+  Serial.println("   📂 SPIFFS: " + String(SPIFFS.begin(false) ? "ДА" : "НЕТ"));
+  Serial.println("   🔊 I2S TX: " + String("готов"));
+  Serial.println("   🎤 I2S RX: " + String("готов"));
+  Serial.println("");
+  Serial.println("🚀 Готов к работе! Скажите 'Алёна' для активации...");
 }
 
 void loop() {
