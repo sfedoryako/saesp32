@@ -347,39 +347,119 @@ void playRadio(const String& stationName) {
 }
 
 String speechToText(const uint8_t* audioData, size_t audioSize) {
-  if (!isTimeSynced || WiFi.status() != WL_CONNECTED || audioSize == 0) return "";
+  if (!isTimeSynced || WiFi.status() != WL_CONNECTED || audioSize == 0) {
+    Serial.println("STT: Пропуск - нет времени, WiFi или данных");
+    return "";
+  }
+  
+  Serial.println("🎤 STT: Начало распознавания, размер: " + String(audioSize) + " байт");
+  
   WiFiClientSecure client;
   client.setCACert(ROOT_CA);
   client.setTimeout(HTTP_TIMEOUT);
+  client.setInsecure(); // Временно для отладки SSL
+  
   HTTPClient http;
   http.setTimeout(HTTP_TIMEOUT);
+  http.setConnectTimeout(15000); // Увеличенный таймаут подключения
+  
+  // Улучшенный URL без GET параметров в строке
   String sttUrl = String("https://") + YANDEX_STT_HOST + "/speech/v1/stt:recognize";
-  String sttQuery = sttUrl + "?folderId=" + String(YANDEX_FOLDER_ID) +
-                    "&lang=ru-RU&format=lpcm&sampleRateHertz=" + String(SAMPLE_RATE_RX);
-  http.begin(client, sttQuery);
+  
+  Serial.println("📡 STT URL: " + sttUrl);
+  Serial.println("🔑 API Key (первые 10 символов): " + String(YANDEX_API_KEY).substring(0, 10) + "...");
+  Serial.println("📁 Folder ID: " + String(YANDEX_FOLDER_ID));
+  
+  // Инициализируем HTTP соединение
+  if (!http.begin(client, sttUrl)) {
+    Serial.println("❌ STT: Ошибка инициализации HTTP клиента");
+    return "";
+  }
+  
+  // Заголовки
   http.addHeader("Authorization", "Api-Key " + String(YANDEX_API_KEY));
   http.addHeader("Content-Type", "application/octet-stream");
+  http.addHeader("x-folder-id", String(YANDEX_FOLDER_ID));
+  http.addHeader("x-data-logging-enabled", "false");
+  
+  // Параметры в URL
+  String fullUrl = sttUrl + "?lang=ru-RU&format=lpcm&sampleRateHertz=" + String(SAMPLE_RATE_RX);
+  http.begin(client, fullUrl);
+  
+  // Повторяем заголовки после смены URL
+  http.addHeader("Authorization", "Api-Key " + String(YANDEX_API_KEY));
+  http.addHeader("Content-Type", "application/octet-stream");
+  http.addHeader("x-folder-id", String(YANDEX_FOLDER_ID));
+  http.addHeader("x-data-logging-enabled", "false");
+  
   String result = "";
+  
   for (int attempt = 0; attempt < STT_RETRY_ATTEMPTS; attempt++) {
-    Serial.println("Свободная память перед STT: " + String(ESP.getFreeHeap()));
+    Serial.println("🔄 STT попытка " + String(attempt + 1) + "/" + String(STT_RETRY_ATTEMPTS));
+    Serial.println("💾 Свободная память: " + String(ESP.getFreeHeap()) + " байт");
+    
+    // DNS проверка
+    IPAddress ip;
+    if (WiFi.hostByName(YANDEX_STT_HOST, ip)) {
+      Serial.println("🌐 DNS успешно: " + ip.toString());
+    } else {
+      Serial.println("❌ DNS ошибка для " + String(YANDEX_STT_HOST));
+      delay(STT_RETRY_DELAY_MS);
+      continue;
+    }
+    
     int httpCode = http.POST(const_cast<uint8_t*>(audioData), audioSize);
+    
+    Serial.println("📊 HTTP код ответа: " + String(httpCode));
+    
     if (httpCode == HTTP_CODE_OK) {
       String payload = http.getString();
+      Serial.println("✅ STT успешно, ответ: " + payload.substring(0, min(200, (int)payload.length())));
+      
       StaticJsonDocument<1024> responseDoc;
       DeserializationError error = deserializeJson(responseDoc, payload);
+      
       if (!error && responseDoc.containsKey("result")) {
         result = responseDoc["result"].as<String>();
+        Serial.println("🎯 Распознанный текст: " + result);
         break;
       } else {
-        Serial.println("STT: Ошибка парсинга: " + payload);
+        Serial.println("❌ STT: Ошибка парсинга JSON");
+        Serial.println("📄 Полный ответ: " + payload);
       }
+    } else if (httpCode == -1) {
+      Serial.println("❌ STT: Connection Refused - возможные причины:");
+      Serial.println("   1. Проверьте API ключ и folder ID");
+      Serial.println("   2. Проверьте интернет соединение");
+      Serial.println("   3. Возможно блокировка файрволом");
+      Serial.println("   4. Проблемы с SSL сертификатом");
+      
+      // Дополнительная диагностика
+      Serial.println("🔍 Дополнительная диагностика:");
+      Serial.println("   WiFi статус: " + String(WiFi.status()));
+      Serial.println("   WiFi RSSI: " + String(WiFi.RSSI()) + " dBm");
+      Serial.println("   Свободная память: " + String(ESP.getFreeHeap()) + " байт");
+      
     } else {
-      Serial.printf("STT: Ошибка %d, %s\n", httpCode, http.errorToString(httpCode).c_str());
-      Serial.println("Ответ: " + http.getString());
+      Serial.printf("❌ STT: HTTP ошибка %d - %s\n", httpCode, http.errorToString(httpCode).c_str());
+      String response = http.getString();
+      if (response.length() > 0) {
+        Serial.println("📄 Ответ сервера: " + response);
+      }
     }
-    delay(STT_RETRY_DELAY_MS);
+    
+    if (attempt < STT_RETRY_ATTEMPTS - 1) {
+      Serial.println("⏱️ Ожидание " + String(STT_RETRY_DELAY_MS) + " мс перед повтором...");
+      delay(STT_RETRY_DELAY_MS);
+    }
   }
+  
   http.end();
+  
+  if (result.isEmpty()) {
+    Serial.println("❌ STT: Не удалось распознать речь после всех попыток");
+  }
+  
   return result;
 }
 
