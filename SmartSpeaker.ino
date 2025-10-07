@@ -81,6 +81,33 @@ RadioStation radioStations[] = {
 const int NUM_STATIONS = sizeof(radioStations) / sizeof(radioStations[0]);
 
 // =======================================================
+// ВСТРОЕННЫЙ SSL СЕРТИФИКАТ
+// =======================================================
+const char* ROOT_CA = \
+"-----BEGIN CERTIFICATE-----\n" \
+"MIIDrzCCApegAwIBAgIQCDvgVpBCRrGhdWrJWZHHSjANBgkqhkiG9w0BAQUFADBh\n" \
+"MQswCQYDVQQGEwJVUzEVMBMGA1UEChMMRGlnaUNlcnQgSW5jMRkwFwYDVQQLExB3\n" \
+"d3cuZGlnaWNlcnQuY29tMSAwHgYDVQQDExdEaWdpQ2VydCBHbG9iYWwgUm9vdCBD\n" \
+"QTAeFw0wNjExMTAwMDAwMDBaFw0zMTExMTAwMDAwMDBaMGExCzAJBgNVBAYTAlVT\n" \
+"MRUwEwYDVQQKEwxEaWdpQ2VydCBJbmMxGTAXBgNVBAsTEHd3dy5kaWdpY2VydC5j\n" \
+"b20xIDAeBgNVBAMTF0RpZ2lDZXJ0IEdsb2JhbCBSb290IENBMIIBIjANBgkqhkiG\n" \
+"9w0BAQEFAAOCAQ8AMIIBCgKCAQEA4jvhEXLeqKTTo1eqUKKPC3eQyaKl7hLOllsB\n" \
+"CSDMAZOnTjC3U/dDxGkAV53ijSLdhwZAAIEJzs4bg7/fzTtxRuLWZscFs3YnFo97\n" \
+"nh6Vfe63SKMI2tavegw5BmV/Sl0fvBf4q77uKNd0f3p4mVmFaG5cIzJLv07A6Fpt\n" \
+"43C/dxC//AH2hdmoRBBYMql1GNXRor5H4idq9Joz+EkIYIvUX7Q6hL+hqkpMfT7P\n" \
+"T19sdl6gSzeRntwi5m3OFBqOasv+zbMUZBfHWymeMr/y7vrTC0LUq7dBMtoM1O/4\n" \
+"gdW7jVg/tRvoSSiicNoxBN33shbyTApOB6jtSj1etX+jkMOvJwIDAQABo2MwYTAO\n" \
+"BgNVHQ8BAf8EBAMCAYYwDwYDVR0TAQH/BAUwAwEB/zAdBgNVHQ4EFgQUA95QNVbR\n" \
+"TLtm8KPiGxvDl7I90VUwHwYDVR0jBBgwFoAUA95QNVbRTLtm8KPiGxvDl7I90VUw\n" \
+"DQYJKoZIhvcNAQEFBQADggEBAMucN6pIExIK+t1EnE9SsPTfrgT1eXkIoyQY/Esr\n" \
+"hMAtudXH/vTBH1jLuG2cenTnmCmrEbXjcKChzUyImZOMkXDiqw8cvpOp/2PV5Adg\n" \
+"06O/nVsJ8dWO41P0jmP6P6fbtGbfYmbW0W5BjfIttep3Sp+dWOIrWcBAI+0tKIJF\n" \
+"PnlUkiaY4IBIqDfv8NZ5YBberOgOzW6sRBc4L0na4UU+Krk2U886UAb3LujEV0ls\n" \
+"YSEYQSteDwsOoBrp+uvFRTp2InBuThs4pFsiv9kuXclVzDAGySj4dzp30d8tbQk\n" \
+"CAUW7C29C79Fv1C5qfPrmAESrciIxpg0X40KPMbp1ZWVbd4=\n" \
+"-----END CERTIFICATE-----\n";
+
+// =======================================================
 // 3. ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ
 // =======================================================
 WebServer server(80);
@@ -217,14 +244,7 @@ void speak(const String& text) {
   stopRadio();
   isSpeeching = true;
   WiFiClientSecure client;
-  char cert[1500] = {0};
-  if (!loadCertificateFromSPIFFS(CERT_FILE, cert, sizeof(cert))) {
-    Serial.println("Ошибка: Не удалось загрузить сертификат для TTS");
-    isSpeeching = false;
-    xSemaphoreGive(xMutex);
-    return;
-  }
-  client.setCACert(cert);
+  client.setCACert(ROOT_CA);
   client.setTimeout(HTTP_TIMEOUT);
   HTTPClient http;
   http.setTimeout(HTTP_TIMEOUT);
@@ -302,13 +322,7 @@ void playRadio(const String& stationName) {
   int slashIndex = url.indexOf('/');
   host = (slashIndex != -1) ? url.substring(0, slashIndex) : url;
   path = (slashIndex != -1) ? url.substring(slashIndex) : "/";
-  char cert[1500] = {0};
-  if (isHttps && !loadCertificateFromSPIFFS(CERT_FILE, cert, sizeof(cert))) {
-    Serial.println("Ошибка: Не удалось загрузить сертификат для радио");
-    xSemaphoreGive(xMutex);
-    return;
-  }
-  if (isHttps) radioClient.setCACert(cert);
+  if (isHttps) radioClient.setCACert(ROOT_CA);
   uint16_t port = isHttps ? 443 : 80;
   if (!radioClient.connect(host.c_str(), port)) {
     Serial.println("Ошибка подключения к радио: " + host);
@@ -335,12 +349,7 @@ void playRadio(const String& stationName) {
 String speechToText(const uint8_t* audioData, size_t audioSize) {
   if (!isTimeSynced || WiFi.status() != WL_CONNECTED || audioSize == 0) return "";
   WiFiClientSecure client;
-  char cert[1500] = {0};
-  if (!loadCertificateFromSPIFFS(CERT_FILE, cert, sizeof(cert))) {
-    Serial.println("Ошибка: Не удалось загрузить сертификат для STT");
-    return "";
-  }
-  client.setCACert(cert);
+  client.setCACert(ROOT_CA);
   client.setTimeout(HTTP_TIMEOUT);
   HTTPClient http;
   http.setTimeout(HTTP_TIMEOUT);
@@ -407,79 +416,7 @@ void processCommand(const String& command) {
   }
 }
 
-String getWeather(const String& city) {
-  if (!isTimeSynced) return "Время не синхронизировано";
-  WiFiClientSecure client;
-  char cert[1500] = {0};
-  if (!loadCertificateFromSPIFFS(CERT_FILE, cert, sizeof(cert))) {
-    Serial.println("Ошибка: Не удалось загрузить сертификат для погоды");
-    return "Ошибка получения погоды.";
-  }
-  client.setCACert(cert);
-  HTTPClient http;
-  String url = "https://api.openweathermap.org/data/2.5/weather?q=" + city +
-               "&appid=" + OPENWEATHER_API_KEY + "&units=metric&lang=ru";
-  http.begin(client, url);
-  int httpCode = http.GET();
-  String response = "Ошибка получения погоды.";
-  if (httpCode == HTTP_CODE_OK) {
-    String payload = http.getString();
-    StaticJsonDocument<2048> doc;
-    DeserializationError error = deserializeJson(doc, payload);
-    if (!error) {
-      float temp = doc["main"]["temp"];
-      String desc = doc["weather"][0]["description"];
-      response = "В " + city + " температура " + String(temp, 0) + " градусов, " + desc + ".";
-    } else {
-      Serial.println("Ошибка парсинга погоды: " + payload);
-    }
-  } else {
-    Serial.printf("Ошибка погоды: HTTP %d\n", httpCode);
-    Serial.println("Ответ: " + http.getString());
-  }
-  http.end();
-  return response;
-}
 
-String getBitcoinPrice() {
-  if (!isTimeSynced) return "Время не синхронизировано";
-  WiFiClientSecure client;
-  char cert[1500] = {0};
-  if (!loadCertificateFromSPIFFS(CERT_FILE, cert, sizeof(cert))) {
-    Serial.println("Ошибка: Не удалось загрузить сертификат для курса");
-    return "Ошибка получения цены биткоина.";
-  }
-  client.setCACert(cert);
-  HTTPClient http;
-  http.begin(client, COINGECKO_URL);
-  int httpCode = http.GET();
-  String response = "Ошибка получения цены биткоина.";
-  if (httpCode == HTTP_CODE_OK) {
-    String payload = http.getString();
-    StaticJsonDocument<512> doc;
-    DeserializationError error = deserializeJson(doc, payload);
-    if (!error) {
-      float price = doc["bitcoin"]["rub"];
-      response = "Цена биткоина: " + String(price, 2) + " рублей.";
-    } else {
-      Serial.println("Ошибка парсинга курса: " + payload);
-    }
-  } else {
-    Serial.printf("Ошибка курса: HTTP %d\n", httpCode);
-    Serial.println("Ответ: " + http.getString());
-  }
-  http.end();
-  return response;
-}
-
-String getTime() {
-  time_t now = time(nullptr);
-  struct tm timeinfo;
-  localtime_r(&now, &timeinfo);
-  char timeStr[64];
-  strftime(timeStr, sizeof(timeStr), "%H:%M", &timeinfo);
-  return String("Текущее время: ") + timeStr + " по московскому времени.";
-}
 
 // =======================================================
 // 5. ОБРАБОТЧИКИ WEB-СЕРВЕРА
@@ -960,4 +897,106 @@ void loop() {
     }
   }
   delay(10);
+}
+
+// =======================================================
+// НЕДОСТАЮЩИЕ ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ  
+// =======================================================
+
+// Функция получения погоды через OpenWeatherMap API
+String getWeather(const String& city) {
+  HTTPClient http;
+  WiFiClientSecure client;
+  client.setCACert(ROOT_CA);
+  
+  String url = "https://api.openweathermap.org/data/2.5/weather?q=" + city + "&appid=" + String(OPENWEATHER_API_KEY) + "&units=metric&lang=ru";
+  
+  http.begin(client, url);
+  http.setTimeout(HTTP_TIMEOUT);
+  int httpCode = http.GET();
+  
+  if (httpCode > 0) {
+    String payload = http.getString();
+    StaticJsonDocument<1024> doc;
+    DeserializationError error = deserializeJson(doc, payload);
+    
+    if (!error) {
+      String description = doc["weather"][0]["description"].as<String>();
+      float temp = doc["main"]["temp"];
+      float feels_like = doc["main"]["feels_like"];
+      int humidity = doc["main"]["humidity"];
+      
+      String result = "Погода в городе " + city + ": " + description + 
+                     ". Температура " + String((int)temp) + " градусов" +
+                     ", ощущается как " + String((int)feels_like) + " градусов" +
+                     ". Влажность " + String(humidity) + " процентов.";
+      
+      http.end();
+      return result;
+    }
+  }
+  
+  http.end();
+  return "Не удалось получить данные о погоде. Проверьте подключение к интернету и API ключ.";
+}
+
+// Функция получения времени
+String getTime() {
+  HTTPClient http;
+  WiFiClient client;
+  
+  http.begin(client, WORLDTIME_URL);
+  http.setTimeout(HTTP_TIMEOUT);
+  int httpCode = http.GET();
+  
+  if (httpCode > 0) {
+    String payload = http.getString();
+    StaticJsonDocument<512> doc;
+    DeserializationError error = deserializeJson(doc, payload);
+    
+    if (!error) {
+      String datetime = doc["datetime"].as<String>();
+      // Извлекаем время из ISO формата (например: 2024-01-15T14:30:45.123456+03:00)
+      int timeStart = datetime.indexOf('T') + 1;
+      int timeEnd = datetime.indexOf('.');
+      if (timeEnd == -1) timeEnd = datetime.indexOf('+');
+      
+      String time = datetime.substring(timeStart, timeEnd);
+      String result = "Текущее время в Москве: " + time;
+      
+      http.end();
+      return result;
+    }
+  }
+  
+  http.end();
+  return "Не удалось получить текущее время. Проверьте подключение к интернету.";
+}
+
+// Функция получения курса биткоина
+String getBitcoinPrice() {
+  HTTPClient http;
+  WiFiClientSecure client;
+  client.setCACert(ROOT_CA);
+  
+  http.begin(client, COINGECKO_URL);
+  http.setTimeout(HTTP_TIMEOUT);
+  int httpCode = http.GET();
+  
+  if (httpCode > 0) {
+    String payload = http.getString();
+    StaticJsonDocument<256> doc;
+    DeserializationError error = deserializeJson(doc, payload);
+    
+    if (!error) {
+      float price = doc["bitcoin"]["rub"];
+      String result = "Курс биткоина: " + String((int)price) + " рублей";
+      
+      http.end();
+      return result;
+    }
+  }
+  
+  http.end();
+  return "Не удалось получить курс биткоина. Проверьте подключение к интернету.";
 }
